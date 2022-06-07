@@ -1,0 +1,229 @@
+version: '3.9'
+
+
+services:
+
+
+  axonserver:
+    image: axoniq/axonserver
+    hostname: axonserver
+    container_name: axonserver
+    volumes:
+      - type: bind
+        source: ./axonserver/data
+        target: /data
+      - type: bind
+        source: ./axonserver/events
+        target: /eventdata
+      - type: bind
+        source: ./axonserver/config
+        target: /config
+        read_only: true
+    ports:
+      - '8024:8024'
+      - '8124:8124'
+      - '8224:8224'
+    networks:
+      backend:
+        aliases:
+          - "axonserver"
+
+  configserver:
+    build: ./config-server
+    image: configserver:latest
+    container_name: configServer
+    environment:
+      PROFILE: "dev"
+    ports:
+      - "7071:7071"
+    networks:
+      backend:
+        aliases:
+          - "configserver"
+  eurekaserver:
+    build: ./eureka-server
+    image: eurekaserver:latest
+    environment:
+      CONFIGSERVER: configserver
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    container_name: eurekaServer
+    ports:
+      - "7070:7070"
+    depends_on:
+      - configserver
+    networks:
+      backend:
+        aliases:
+          - "eurekaserver"
+  gatewayserver:
+    build: ./gateway-server
+    image: gatewayserver:latest
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    container_name: gatewayServer
+    ports:
+      - "7072:7072"
+    environment:
+      PROFILE: "dev"
+      SERVER_PORT: "7072"
+      LOGSTASH: logstash
+      ZIPKIN: zipkin
+      CONFIGSERVER: configserver
+      EUREKASERVER: eurekaserver
+      EUREKASERVER_PORT: "7070"
+      CONFIGSERVER_PORT: "7071"
+    depends_on:
+      - configserver
+      - eurekaserver
+    networks:
+      backend:
+        aliases:
+          - "gatewayserver"
+
+  redisserver:
+    image: redis:alpine
+    container_name: redisServer
+    ports:
+      - 6379-6382:6379-6382
+    networks:
+      backend:
+        aliases:
+          - "redis"
+
+
+
+#      ELK stack for logging and debugging
+  elasticsearch:
+    image: library/elasticsearch:7.7.0
+    container_name: elasticsearch
+    environment:
+      - node.name=elasticsearch
+      - discovery.type=single-node
+      - cluster.name=docker-cluster
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - my-db:/usr/share/elasticsearch/data
+    ports:
+#       Cluster communication
+      - 9300:9300
+#       REST communication
+      - 9200:9200
+    networks:
+      backend:
+        aliases:
+          - "elasticsearch"
+  kibana:
+    image: elastic/kibana:7.7.0
+    container_name: kibana
+    environment:
+      ELASTICSEARCH_URL: "http://elasticsearch:9300"
+    ports:
+      - 5601:5601
+    networks:
+      backend:
+        aliases:
+          - "kibana"
+  logstash:
+    image: elastic/logstash:7.7.0
+    container_name: logstash
+    command: logstash -f /etc/logstash/conf.d/logstash.conf
+    volumes:
+      - ./ELK-stack-config/config:/etc/logstash/conf.d
+    ports:
+      - "6000:6000"
+    networks:
+      backend:
+        aliases:
+          - "logstash"
+  zipkin:
+    image: openzipkin/zipkin
+    container_name: zipkin
+    depends_on:
+      - elasticsearch
+    environment:
+      - STORAGE_TYPE=elasticsearch
+      - "ES_HOSTS=elasticsearch:9300"
+    ports:
+      - "9411:9411"
+    networks:
+      backend:
+        aliases:
+          - "zipkin"
+
+# Service instances
+  teamsservice:
+    build: ./TeamsService
+    image: teams-service:latest
+    container_name: teams-service
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    environment:
+      axonserver: axonserver
+      PROFILE: dev
+      LOGSTASH: logstash
+      ZIPKIN: zipkin
+      CONFIGSERVER: configserver
+      EUREKASERVER: eurekaserver
+      CONFIGSERVER_URI: http://configserver:7071
+      REDISSERVER: 'redisserver'
+      CONFIGSERVER_PORT: "7071"
+    depends_on:
+      - configserver
+    ports:
+      - "5001:5001"
+    networks:
+      backend:
+        aliases:
+          - "teamsservice"
+
+
+networks:
+  backend:
+    driver: bridge
+volumes:
+  my-db:
+    driver: local
+  axonserver-data:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${PWD}/axonserver/data
+      o: bind
+  axonserver-events:
+    driver: local
+    driver_opts:
+        type: none
+        device: ${PWD}/axonserver/events
+        o: bind
+  axonserver-config:
+      driver: local
+      driver_opts:
+        type: none
+        device: ${PWD}/axonserver/config
+        o: bind
+
+secrets:
+  axonserver-properties:
+    file: ./axonserver.properties
+  axoniq-license:
+    file: ./axoniq.license
+  axonserver-token:
+    file: ./axonserver.token
