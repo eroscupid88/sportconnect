@@ -1,0 +1,3 @@
+[submodule "elk-stack-config"]
+	path = elk-stack-config
+	url = git@git.cs.usask.ca:dtv782/elk-stack-config.git
