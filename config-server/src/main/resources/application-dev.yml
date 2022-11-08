@@ -1,0 +1,20 @@
+# dev environment running on github configs repository
+server:
+  port: 7071
+spring:
+  application:
+    name: config-server
+  cloud:
+    config:
+      server:
+        git:
+          default-label: main
+          uri: https://github.com/eroscupid88/sportconnect_configuration_repository
+          searchPaths: gateway-server*,team-service-configuration*,eureka-server*,team-roster-service-configuration*,team-manager-service-configuration*
+
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: '*'
